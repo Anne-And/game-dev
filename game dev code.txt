@@ -1,0 +1,316 @@
+using UnityEngine;
+using UnityEngine.UI;
+using UnityEngine.SceneManagement;
+using System.Collections;
+using System.Collections.Generic;
+
+public class GameManager : MonoBehaviour
+{
+    public static GameManager Instance { get; private set; }
+    
+    [Header("Player Settings")]
+    public GameObject playerPrefab;
+    public float moveSpeed = 5f;
+    public float horizontalSpeed = 10f;
+    public float horizontalBoundary = 4.5f;
+    
+    [Header("Level Generation")]
+    public GameObject[] obstaclePrefabs;
+    public GameObject coinPrefab;
+    public GameObject roadPrefab;
+    public float roadLength = 10f;
+    
+    [Header("UI Elements")]
+    public Text scoreText;
+    public Text coinsText;
+    public Slider healthBar;
+    public GameObject gameOverPanel;
+    public Text finalScoreText;
+    public Text finalCoinsText;
+    
+    public int Score { get; private set; } = 0;
+    public int Health { get; private set; } = 100;
+    public int CoinsCollected { get; private set; } = 0;
+    
+    private GameObject player;
+    private Transform playerTransform;
+    private Camera mainCamera;
+    private List<GameObject> spawnedObjects = new List<GameObject>();
+    
+    private float nextObstacleSpawn = 0f;
+    private float nextCoinSpawn = 0f;
+    private float nextRoadSpawn = 0f;
+    private float deleteDistance = -20f;
+    
+    void Awake()
+    {
+        if (Instance == null)
+        {
+            Instance = this;
+        }
+        else
+        {
+            Destroy(gameObject);
+            return;
+        }
+        
+        mainCamera = Camera.main;
+    }
+    
+    void Start()
+    {
+        gameOverPanel.SetActive(false);
+        
+        player = Instantiate(playerPrefab, Vector3.zero, Quaternion.identity);
+        playerTransform = player.transform;
+        
+        for (int i = 0; i < 5; i++)
+        {
+            SpawnRoad(i * roadLength);
+        }
+        
+        UpdateUI();
+        StartCoroutine(CleanupRoutine());
+    }
+    
+    void Update()
+    {
+        if (playerTransform == null) return;
+        
+        HandlePlayerMovement();
+        HandleLevelGeneration();
+        
+        if (Input.GetMouseButtonDown(0))
+        {
+            ShootRaycast();
+        }
+    }
+    
+    void LateUpdate()
+    {
+        if (playerTransform == null) return;
+        
+        Vector3 cameraPosition = mainCamera.transform.position;
+        mainCamera.transform.position = new Vector3(
+            cameraPosition.x,
+            cameraPosition.y,
+            playerTransform.position.z - 10
+        );
+    }
+    
+    void HandlePlayerMovement()
+    {
+        playerTransform.Translate(Vector3.forward * moveSpeed * Time.deltaTime);
+        
+        float horizontalInput = Input.GetAxis("Horizontal");
+        if (horizontalInput != 0)
+        {
+            float newXPosition = playerTransform.position.x + horizontalInput * horizontalSpeed * Time.deltaTime;
+            newXPosition = Mathf.Clamp(newXPosition, -horizontalBoundary, horizontalBoundary);
+            playerTransform.position = new Vector3(newXPosition, playerTransform.position.y, playerTransform.position.z);
+        }
+        
+        if (Input.touchCount > 0)
+        {
+            Touch touch = Input.GetTouch(0);
+            if (touch.phase == TouchPhase.Moved)
+            {
+                float touchDeltaX = touch.deltaPosition.x * 0.01f;
+                float newXPosition = playerTransform.position.x + touchDeltaX * horizontalSpeed;
+                newXPosition = Mathf.Clamp(newXPosition, -horizontalBoundary, horizontalBoundary);
+                playerTransform.position = new Vector3(newXPosition, playerTransform.position.y, playerTransform.position.z);
+            }
+        }
+    }
+    
+    void HandleLevelGeneration()
+    {
+        float playerZ = playerTransform.position.z;
+        
+        if (playerZ + 50 > nextRoadSpawn)
+        {
+            SpawnRoad(nextRoadSpawn);
+            nextRoadSpawn += roadLength;
+        }
+        
+        if (playerZ + 50 > nextObstacleSpawn)
+        {
+            SpawnObstacle(nextObstacleSpawn);
+            nextObstacleSpawn += Random.Range(5f, 15f);
+        }
+        
+        if (playerZ + 50 > nextCoinSpawn)
+        {
+            SpawnCoins(nextCoinSpawn);
+            nextCoinSpawn += Random.Range(3f, 8f);
+        }
+    }
+    
+    void ShootRaycast()
+    {
+        Ray ray = mainCamera.ScreenPointToRay(Input.mousePosition);
+        RaycastHit hit;
+        
+        if (Physics.Raycast(ray, out hit))
+        {
+            if (hit.collider.CompareTag("Obstacle"))
+            {
+                AddScore(5);
+                Destroy(hit.collider.gameObject);
+            }
+        }
+    }
+    
+    void SpawnRoad(float zPos)
+    {
+        GameObject road = Instantiate(roadPrefab, new Vector3(0, 0, zPos), Quaternion.identity);
+        spawnedObjects.Add(road);
+    }
+    
+    void SpawnObstacle(float zPos)
+    {
+        int randomIndex = Random.Range(0, obstaclePrefabs.Length);
+        float randomX = Random.Range(-4f, 4f);
+        
+        GameObject obstacle = Instantiate(obstaclePrefabs[randomIndex], 
+            new Vector3(randomX, 0.5f, zPos), Quaternion.identity);
+        
+        obstacle.tag = "Obstacle";
+        spawnedObjects.Add(obstacle);
+    }
+    
+    void SpawnCoins(float zPos)
+    {
+        float randomX = Random.Range(-4f, 4f);
+        
+        if (Random.Range(0, 100) < 30)
+        {
+            int coinCount = Random.Range(3, 8);
+            float spacing = 1.5f;
+            
+            for (int i = 0; i < coinCount; i++)
+            {
+                GameObject coin = Instantiate(coinPrefab, 
+                    new Vector3(randomX, 1f, zPos + i * spacing), 
+                    Quaternion.Euler(90, 0, 0));
+                
+                coin.tag = "Coin";
+                spawnedObjects.Add(coin);
+            }
+        }
+        else
+        {
+            GameObject coin = Instantiate(coinPrefab, 
+                new Vector3(randomX, 1f, zPos), 
+                Quaternion.Euler(90, 0, 0));
+            
+            coin.tag = "Coin";
+            spawnedObjects.Add(coin);
+        }
+    }
+    
+    IEnumerator CleanupRoutine()
+    {
+        while (true)
+        {
+            yield return new WaitForSeconds(2f);
+            
+            if (playerTransform == null) continue;
+            
+            float playerZ = playerTransform.position.z;
+            List<GameObject> objectsToRemove = new List<GameObject>();
+            
+            foreach (GameObject obj in spawnedObjects)
+            {
+                if (obj == null) continue;
+                
+                if (obj.transform.position.z < playerZ + deleteDistance)
+                {
+                    objectsToRemove.Add(obj);
+                    Destroy(obj);
+                }
+            }
+            
+            foreach (GameObject obj in objectsToRemove)
+            {
+                spawnedObjects.Remove(obj);
+            }
+        }
+    }
+    
+    public void AddScore(int points)
+    {
+        Score += points;
+        UpdateUI();
+    }
+    
+    public void DecreaseHealth(int damage)
+    {
+        Health -= damage;
+        if (Health <= 0)
+        {
+            Health = 0;
+            GameOver();
+        }
+        UpdateUI();
+    }
+    
+    public void CollectCoin()
+    {
+        CoinsCollected++;
+        AddScore(10);
+    }
+    
+    void UpdateUI()
+    {
+        scoreText.text = "Score: " + Score;
+        coinsText.text = "Coins: " + CoinsCollected;
+        healthBar.value = Health / 100f;
+    }
+    
+    void GameOver()
+    {
+        finalScoreText.text = "Final Score: " + Score;
+        finalCoinsText.text = "Coins Collected: " + CoinsCollected;
+        gameOverPanel.SetActive(true);
+        Time.timeScale = 0;
+    }
+    
+    public void RestartGame()
+    {
+        Time.timeScale = 1;
+        SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+    }
+    
+    public void QuitGame()
+    {
+        Application.Quit();
+    }
+}
+
+public class PlayerCollision : MonoBehaviour
+{
+    void OnTriggerEnter(Collider other)
+    {
+        if (other.CompareTag("Obstacle"))
+        {
+            GameManager.Instance.DecreaseHealth(20);
+            Destroy(other.gameObject);
+        }
+        else if (other.CompareTag("Coin"))
+        {
+            GameManager.Instance.CollectCoin();
+            Destroy(other.gameObject);
+        }
+    }
+}
+
+public class CoinRotator : MonoBehaviour
+{
+    public float rotateSpeed = 90f;
+    
+    void Update()
+    {
+        transform.Rotate(Vector3.forward, rotateSpeed * Time.deltaTime);
+    }
+}
